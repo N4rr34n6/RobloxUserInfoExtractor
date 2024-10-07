@@ -91,7 +91,6 @@ The script will also export the following files:
 
 ## Technical Details
 
-- **Logging**: The script logs important events and errors to provide visibility into its operation, including request retries and export completion.
 - **Web Scraping**: BeautifulSoup is used to extract data from user profiles, ensuring that all available information is retrieved accurately.
 
 ## Disclaimer
