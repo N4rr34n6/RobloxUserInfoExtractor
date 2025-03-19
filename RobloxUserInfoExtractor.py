@@ -37,10 +37,33 @@ def search_by_username(username):
     headers = {'User-Agent': get_user_agent()}
     response = request_with_retries(url, headers)
      
-    if response.status_code == 200:
+    if response and response.status_code == 200:
         data = response.json()
         if data['data']:
-            return data['data'][0]['id']
+            # Asegurarnos de que tenemos el ID
+            if 'id' in data['data'][0]:
+                return data['data'][0]['id']
+            # Estructura alternativa si el ID está en otra ubicación
+            elif 'userId' in data['data'][0]:
+                return data['data'][0]['userId']
+    
+    # Método alternativo - intentar buscar directamente con la API de perfil
+    try:
+        url = f"https://www.roblox.com/users/profile?username={username}"
+        headers = {'User-Agent': get_user_agent()}
+        response = requests.get(url, headers=headers, allow_redirects=True)
+        
+        # Si la solicitud redirige a una URL de perfil, extraer el ID
+        if response.status_code == 200 and 'users' in response.url:
+            # La URL será algo como: https://www.roblox.com/users/12345678/profile
+            parts = response.url.split('/')
+            for i, part in enumerate(parts):
+                if part == 'users' and i + 1 < len(parts):
+                    user_id = parts[i + 1]
+                    if user_id.isdigit():
+                        return user_id
+    except:
+        pass
    
     return None
 
@@ -103,15 +126,36 @@ def get_entity_list(user_id, entity_type):
         if response.status_code == 200:
             data = response.json()
             for entity in data['data']:
-                entities.add((entity['name'], f"https://www.roblox.com/users/{entity['id']}/profile"))
+                # Estructura de datos moderna de Roblox
+                if 'displayName' in entity:
+                    name = entity.get('displayName') or entity.get('username', 'Usuario sin nombre')
+                    entity_id = entity.get('id', '')
+                # Comprobamos otras estructuras posibles de datos (compatibilidad hacia atrás)
+                elif 'name' in entity:
+                    name = entity['name']
+                    entity_id = entity['id']
+                # Estructura alternativa (para el caso en que los campos estén en una estructura diferente)
+                elif 'user' in entity and isinstance(entity['user'], dict):
+                    user_data = entity['user']
+                    name = user_data.get('displayName') or user_data.get('name', 'Usuario sin nombre')
+                    entity_id = user_data.get('id', '')
+                else:
+                    # Si no podemos encontrar el nombre, usamos un valor predeterminado y registramos
+                    # las claves disponibles para diagnóstico
+                    available_keys = list(entity.keys())
+                    name = f"Usuario {available_keys}"
+                    entity_id = entity.get('id', '')
+                
+                if entity_id:
+                    entities.add((name, f"https://www.roblox.com/users/{entity_id}/profile"))
             
             cursor = data.get('nextPageCursor')
             if not cursor:
-                break  
+                break
         else:
             break
         
-        time.sleep(1)  
+        time.sleep(1)
     
     return [{'name': name, 'url': url} for name, url in entities]
 
