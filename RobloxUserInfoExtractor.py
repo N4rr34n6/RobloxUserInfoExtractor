@@ -114,50 +114,71 @@ def get_about_me(user_id):
     
     return "Not available"
 
+def resolve_user_names(user_ids: list) -> dict:
+    """Batch-resolve Roblox display names from a list of numeric user IDs.
+    Returns {id_int: 'displayName or name'}. Requests up to 100 IDs each."""
+    result = {}
+    for i in range(0, len(user_ids), 100):
+        chunk = [int(x) for x in user_ids[i:i + 100]]
+        try:
+            r = requests.post(
+                'https://users.roblox.com/v1/users',
+                json={'userIds': chunk, 'excludeBannedUsers': False},
+                timeout=15,
+            )
+            if r.status_code == 200:
+                for u in r.json().get('data', []):
+                    uid_int = u.get('id')
+                    name = u.get('displayName') or u.get('name', '')
+                    if uid_int:
+                        result[uid_int] = name
+        except Exception:
+            pass
+        if i + 100 < len(user_ids):
+            time.sleep(0.3)
+    return result
+
+
 def get_entity_list(user_id, entity_type):
-    entities = set()  
-    cursor = ""
-    
+    """Fetches a paginated list of friends / followers / followings.
+    Roblox removed names from social endpoints: IDs are collected first,
+    then names are resolved in batch via POST /users.roblox.com/v1/users."""
+    ordered_ids = []
+    seen        = set()
+    cursor      = ""
+
     while True:
         url = f"https://friends.roblox.com/v1/users/{user_id}/{entity_type}?limit=100&cursor={cursor}"
         headers = {'User-Agent': get_user_agent()}
         response = requests.get(url, headers=headers)
-        
-        if response.status_code == 200:
-            data = response.json()
-            for entity in data['data']:
-                # Estructura de datos moderna de Roblox
-                if 'displayName' in entity:
-                    name = entity.get('displayName') or entity.get('username', 'Usuario sin nombre')
-                    entity_id = entity.get('id', '')
-                # Comprobamos otras estructuras posibles de datos (compatibilidad hacia atrás)
-                elif 'name' in entity:
-                    name = entity['name']
-                    entity_id = entity['id']
-                # Estructura alternativa (para el caso en que los campos estén en una estructura diferente)
-                elif 'user' in entity and isinstance(entity['user'], dict):
-                    user_data = entity['user']
-                    name = user_data.get('displayName') or user_data.get('name', 'Usuario sin nombre')
-                    entity_id = user_data.get('id', '')
-                else:
-                    # Si no podemos encontrar el nombre, usamos un valor predeterminado y registramos
-                    # las claves disponibles para diagnóstico
-                    available_keys = list(entity.keys())
-                    name = f"Usuario {available_keys}"
-                    entity_id = entity.get('id', '')
-                
-                if entity_id:
-                    entities.add((name, f"https://www.roblox.com/users/{entity_id}/profile"))
-            
-            cursor = data.get('nextPageCursor')
-            if not cursor:
-                break
-        else:
+
+        if response.status_code != 200:
             break
-        
+
+        data = response.json()
+        for entity in data.get('data', []):
+            # ID may be at root level or inside a nested 'user' dict
+            if isinstance(entity.get('user'), dict):
+                eid = entity['user'].get('id')
+            else:
+                eid = entity.get('id')
+            if eid and eid not in seen:
+                seen.add(eid)
+                ordered_ids.append(int(eid))
+
+        cursor = data.get('nextPageCursor') or ''
+        if not cursor:
+            break
         time.sleep(1)
-    
-    return [{'name': name, 'url': url} for name, url in entities]
+
+    if not ordered_ids:
+        return []
+
+    names = resolve_user_names(ordered_ids)
+    return [
+        {'name': names.get(eid, str(eid)), 'url': f'https://www.roblox.com/users/{eid}/profile'}
+        for eid in ordered_ids
+    ]
 
 def get_user_info(identifier):
     if identifier.isdigit():
